@@ -48,6 +48,7 @@ directory.
 | `ssh_host`       | —        | `aur.archlinux.org` | AUR SSH host (override for mirrors/testing) |
 | `commit_message` | —        | `chore(aur): update to v{version}` | Commit message; `{version}` and `{pkgname}` are substituted |
 | `dry_run`        | —        | `false`             | Clone + prune + stage without commit/push (CI dry-check) |
+| `pkgrel_mode`    | —        | `none`              | How to handle `pkgrel` in the published `PKGBUILD` (see below) |
 
 ## Outputs
 
@@ -78,6 +79,38 @@ rm_patterns: "odm-bin-*.1,odm-bin-*.conf.example,odm-bin-*.service"
 ```
 
 Unmatched patterns are harmless (`git rm --ignore-unmatch`).
+
+## `pkgrel_mode`
+
+AUR packages carry two version fields in `PKGBUILD`: `pkgver` (upstream
+version, e.g. `1.2.0`) and `pkgrel` (rebuild counter for the same upstream
+version — `1`, `2`, …). The rules:
+
+| Situation            | `pkgver` | `pkgrel` |
+|----------------------|----------|----------|
+| New upstream release | bumped   | **reset to 1** |
+| Re-publish same version (packaging fix) | same | **bump +1** (so AUR notices) |
+
+`pkgrel_mode` automates the `pkgrel` half:
+
+| Mode    | Behaviour |
+|---------|-----------|
+| `none`  | Leave the local PKGBUILD untouched (dumb sync) |
+| `reset` | Set `pkgrel=1` — use in a release workflow when `pkgver` was just bumped |
+| `bump`  | Read `pkgrel` from the current upstream AUR clone, set local = upstream + 1 |
+| `auto`  | Compare upstream `pkgver` vs local: differ → `reset`, same → `bump` |
+
+Requires `PKGBUILD` (plain path entry) in `files`. The upstream values are
+read from the fresh clone *before* pruning, so they reflect the live AUR
+even when this push replaces it.
+
+```yaml
+# Release workflow — always reset
+pkgrel_mode: reset
+
+# Re-publish workflow — bump if upstream is behind
+pkgrel_mode: auto
+```
 
 ## Typical workflow (Odm-style release)
 

@@ -53,6 +53,14 @@ inputs:
     description: "When true, clones + prunes + stages but does not commit or push"
     required: false
     default: "false"
+  pkgrel_mode:
+    description: |
+      How to handle pkgrel in PKGBUILD (requires PKGBUILD in files).
+      none — leave untouched. reset — pkgrel=1 (new release). bump —
+      local = upstream pkgrel + 1 (re-publish existing version).
+      auto — compare upstream pkgver vs local: differ → reset, same → bump.
+    required: false
+    default: "none"
 
 outputs:
   committed:
@@ -77,3 +85,4 @@ runs:
         INPUT_SSH_HOST: ${{ inputs.ssh_host }}
         INPUT_COMMIT_MESSAGE: ${{ inputs.commit_message }}
         INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        INPUT_PKGREL_MODE: ${{ inputs.pkgrel_mode }}

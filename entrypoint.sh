@@ -74,6 +74,52 @@ trap 'rm -rf "$AUR_DIR"' EXIT
 git clone -q "ssh://aur@${SSH_HOST}/${PKGNAME}.git" "$AUR_DIR"
 cd "$AUR_DIR"
 
+# --- pkgrel handling (optional) --------------------------------------------
+# mode: none | reset | bump | auto
+#   none  — leave the local PKGBUILD untouched (dumb sync)
+#   reset — set pkgrel=1 (a new upstream release)
+#   bump  — set local pkgrel = upstream pkgrel + 1 (re-publish of a version
+#           already on the AUR; namanya harus berubah biar AUR detect)
+#   auto  — compare upstream pkgver vs local: differ → reset; same → bump
+# The upstream values are read from the fresh clone BEFORE pruning, so they
+# reflect the current live AUR state even when this push replaces it.
+PKGREL_MODE="${INPUT_PKGREL_MODE:-none}"
+LOCAL_PKGBUILD=""
+for i in "${!SRC_PATHS[@]}"; do
+  if [[ "${DEST_NAMES[$i]}" == "" && "$(basename "${SRC_PATHS[$i]}")" == "PKGBUILD" ]]; then
+    LOCAL_PKGBUILD="${SRC_PATHS[$i]}"
+    break
+  fi
+done
+if [[ "$PKGREL_MODE" != "none" && -n "$LOCAL_PKGBUILD" ]]; then
+  UP_VER=$(grep -oP '^pkgver=\K.*' "$AUR_DIR/PKGBUILD" 2>/dev/null || true)
+  UP_REL=$(grep -oP '^pkgrel=\K.*' "$AUR_DIR/PKGBUILD" 2>/dev/null || true)
+  LOCAL_VER=$(grep -oP '^pkgver=\K.*' "$LOCAL_PKGBUILD" 2>/dev/null || true)
+  LOCAL_REL=$(grep -oP '^pkgrel=\K.*' "$LOCAL_PKGBUILD" 2>/dev/null || true)
+
+  case "$PKGREL_MODE" in
+    reset)
+      NEW_REL=1
+      ;;
+    bump)
+      NEW_REL=$((UP_REL + 1))
+      ;;
+    auto)
+      if [[ -n "$UP_VER" && "$UP_VER" != "$LOCAL_VER" ]]; then
+        NEW_REL=1
+      else
+        NEW_REL=$((UP_REL + 1))
+      fi
+      ;;
+  esac
+  if [[ -n "$NEW_REL" && "$NEW_REL" != "$LOCAL_REL" ]]; then
+    sed -i "s/^pkgrel=.*/pkgrel=${NEW_REL}/" "$LOCAL_PKGBUILD"
+    echo "pkgrel: ${LOCAL_REL:-none} -> ${NEW_REL} (mode $PKGREL_MODE)"
+  else
+    echo "pkgrel: keeping ${LOCAL_REL:-none} (mode $PKGREL_MODE)"
+  fi
+fi
+
 # --- Prune stale assets ----------------------------------------------------
 # Glob expansion happens in the AUR repo; GLOBIGNORE keeps unmatched patterns
 # literal so git rm --ignore-unmatch stays quiet.
