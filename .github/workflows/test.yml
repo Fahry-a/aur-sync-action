@@ -1,0 +1,21 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Unit self-tests
+        run: |
+          bash -n entrypoint.sh
+          bash lib/files.sh
+          bash lib/pkgrel.sh
+
+      - name: Smoke test (dry-run, fake git, no network)
+        run: bash test/smoke.sh
