@@ -24,6 +24,6 @@ changelog:
       regexp: ^.*?(build|ci)(\(.+\))??!?:.+$
       order: 4
     - title: "Documentation updates"
-      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      regexp: "^.*docs?([(\\w)]*)?!?:.+$"
       order: 4
     - title: Others

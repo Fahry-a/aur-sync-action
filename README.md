@@ -30,9 +30,12 @@ Replaces hand-rolled sync scripts with a reusable, self-contained action.
       odm-bin-*.LICENSE
 ```
 
-Run from a step whose working directory contains the sources (usually
-`packaging/` or after a build step). Glob paths are relative to that
-directory.
+Sources are resolved against the **job workspace** (`$GITHUB_WORKSPACE`),
+not against the calling step's `working-directory` — composite action steps
+always run in the workspace root. Put the sources under the workspace root
+(e.g. the repo's `packaging/` directory) and reference them relative to it.
+If you need a different base, run the action from a step where the workspace
+expected layout matches, or prepare the sources at the workspace root first.
 
 ## Inputs
 
@@ -47,14 +50,14 @@ directory.
 | `rm_patterns`    | —        | `""`                | Comma-separated globs pruned before publishing (stale assets), relative to the AUR repo root |
 | `ssh_host`       | —        | `aur.archlinux.org` | AUR SSH host (override for mirrors/testing) |
 | `commit_message` | —        | `chore(aur): update to v{version}` | Commit message; `{version}` and `{pkgname}` are substituted |
-| `dry_run`        | —        | `false`             | Clone + prune + stage without commit/push (CI dry-check) |
+| `dry_run`        | —        | `false`             | Clone + prune + stage without commit/push (CI dry-check); `committed` = `true` when a push *would* happen |
 | `pkgrel_mode`    | —        | `none`              | How to handle `pkgrel` in the published `PKGBUILD` (see below) |
 
 ## Outputs
 
 | Output      | Description |
 |-------------|-------------|
-| `committed` | `true` when a commit was pushed (or staged in dry-run); `false` when nothing changed |
+| `committed` | `true` when a commit was pushed, or (in dry-run) when changes were staged — meaning a push *would* happen; `false` when nothing changed |
 
 ## `files` syntax
 
@@ -128,39 +131,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare assets (pkbuild, sourceinfo…)
-        working-directory: packaging
+      - name: Prepare assets (pkgbuild, sourceinfo…)
         run: | ... # produce PKGBUILD, .SRCINFO, versioned assets
-      - name: Publish AUR
-        uses: Fahry-a/aur-sync-action@v1
-        with:
-          package_name: odm-bin
-          ssh_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          git_username: ${{ secrets.AUR_USERNAME }}
-          git_email: ${{ secrets.AUR_EMAIL }}
-          version: ${{ github.ref_name }}
-          # ...
-```
-
-## Typical workflow (Odm-style release)
-
-`version` is optional — supply it when your assets carry a version suffix,
-omit it for static-only packages (just `PKGBUILD` + `.SRCINFO`).
-
-```yaml
-name: Publish AUR
-on:
-  release:
-    types: [published]
-
-jobs:
-  aur:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Prepare assets (pkbuild, sourceinfo…)
-        working-directory: packaging
-        run: | ... # produce PKGBUILD, .SRCINFO, versioned assets
+                    # at the workspace root (see "sources" note above)
       - name: Publish AUR
         uses: Fahry-a/aur-sync-action@v1
         with:
@@ -246,7 +219,9 @@ No `version` → files keep their plain names (`PKGBUILD`, `.SRCINFO`).
     dry_run: "true"
 ```
 
-Clones the AUR repo, applies pruning + pkgrel + staging — without committing
-or pushing. The PR CI can assert `committed=true` (meaning "would publish").
+Clones the AUR repo, applies pruning + pkgrel + staging, without committing
+or pushing. `committed=true` in dry-run means the push *would* happen
+(changes staged); PR CI can assert on it. `committed=false` means nothing
+changed on the AUR side.
 
 ## MIT — see [LICENSE](LICENSE).
