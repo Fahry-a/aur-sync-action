@@ -142,6 +142,111 @@ jobs:
           # ...
 ```
 
-## License
+## Typical workflow (Odm-style release)
 
-MIT — see [LICENSE](LICENSE).
+`version` is optional — supply it when your assets carry a version suffix,
+omit it for static-only packages (just `PKGBUILD` + `.SRCINFO`).
+
+```yaml
+name: Publish AUR
+on:
+  release:
+    types: [published]
+
+jobs:
+  aur:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare assets (pkbuild, sourceinfo…)
+        working-directory: packaging
+        run: | ... # produce PKGBUILD, .SRCINFO, versioned assets
+      - name: Publish AUR
+        uses: Fahry-a/aur-sync-action@v1
+        with:
+          package_name: odm-bin
+          ssh_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          git_username: ${{ secrets.AUR_USERNAME }}
+          git_email: ${{ secrets.AUR_EMAIL }}
+          version: ${{ github.ref_name }}
+          # ...
+```
+
+## Usage examples
+
+### 1. Release of a versioned package (reset pkgrel)
+
+```yaml
+- uses: Fahry-a/aur-sync-action@v1
+  with:
+    package_name: odm-bin
+    ssh_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    git_username: ${{ secrets.AUR_USERNAME }}
+    git_email: ${{ secrets.AUR_EMAIL }}
+    version: 1.2.0
+    pkgrel_mode: reset            # new release — always pkgrel=1
+    files: |-
+      PKGBUILD,
+      .SRCINFO,
+      man:docs/odm.1,
+      conf:configs/odm.conf.example,
+      service:service/odm.service,
+      license:LICENSE
+    rm_patterns: |-
+      odm-bin-*.1,
+      odm-bin-*.conf.example,
+      odm-bin-*.service,
+      odm-bin-*.LICENSE
+```
+
+Upstream AUR has `pkgrel=3` from an earlier re-publish; this push publishes
+`pkgver=1.2.0, pkgrel=1` (reset).
+
+### 2. Re-publish the same version (auto bump pkgrel)
+
+```yaml
+with:
+  package_name: odm-bin
+  version: 1.2.0
+  pkgrel_mode: auto               # pkgver same → bump; differ → reset
+  files: "PKGBUILD,.SRCINFO"
+```
+
+Upstream has `pkgver=1.2.0, pkgrel=2`; local PKGBUILD says `pkgver=1.2.0,
+pkgrel=1` → action sets `pkgrel=3` and publishes the fix. AUR users get the
+rebuilt package.
+
+### 3. Static-only package (no version, no assets)
+
+```yaml
+with:
+  package_name: my-config
+  ssh_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+  git_username: ${{ secrets.AUR_USERNAME }}
+  git_email: ${{ secrets.AUR_EMAIL }}
+  files: "PKGBUILD,.SRCINFO"
+  rm_patterns: ""       # nothing to prune
+  pkgrel_mode: bump     # re-release — upstream pkgrel + 1
+```
+
+No `version` → files keep their plain names (`PKGBUILD`, `.SRCINFO`).
+
+### 4. Dry-run in CI (verify before publishing)
+
+```yaml
+- name: Verify AUR publish (no push)
+  uses: Fahry-a/aur-sync-action@v1
+  with:
+    package_name: odm-bin
+    ssh_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    git_username: ${{ secrets.AUR_USERNAME }}
+    git_email: ${{ secrets.AUR_EMAIL }}
+    version: 1.2.0
+    files: "PKGBUILD,.SRCINFO"
+    dry_run: "true"
+```
+
+Clones the AUR repo, applies pruning + pkgrel + staging — without committing
+or pushing. The PR CI can assert `committed=true` (meaning "would publish").
+
+## MIT — see [LICENSE](LICENSE).
