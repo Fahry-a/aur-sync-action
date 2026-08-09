@@ -1,0 +1,79 @@
+name: "AUR Sync"
+description: "Publish PKGBUILD + assets to the AUR with stale-version pruning (atomic single commit)"
+author: "Fahry-a"
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  package_name:
+    description: "AUR package name (must match the remote repo, e.g. odm-bin)"
+    required: true
+  ssh_key:
+    description: "SSH private key with push access to the AUR package (secrets.AUR_SSH_PRIVATE_KEY)"
+    required: true
+  git_username:
+    description: "Commit author name"
+    required: true
+  git_email:
+    description: "Commit author email"
+    required: true
+  version:
+    description: |
+      Version string (e.g. 1.2.0). When set, every file in `files` is copied
+      as <basename>-<version><ext> (name: source pairs rename to name-<version>).
+      When empty, files are copied with their plain names (no version suffix).
+    required: false
+    default: ""
+  files:
+    description: |
+      Files to publish, comma-separated. Each entry is a source path (relative
+      to the working directory) or a glob. Optional `name:` prefix renames the
+      file on the AUR side; with a version it becomes name-<version><ext>.
+      Examples: "PKGBUILD,.SRCINFO,man:../docs/odm.1,conf:../configs/x.conf"
+    required: true
+  rm_patterns:
+    description: |
+      Comma-separated glob patterns (relative to the AUR repo root) to prune
+      before publishing — the stale-asset sweeper. Unversioned patterns are
+      always applied verbatim; versioned assets are additionally matched with
+      the new version substituted. Example:
+      "<pkgname>-*.1,<pkgname>-*.conf.example,<pkgname>-*.LICENSE"
+    required: false
+    default: ""
+  ssh_host:
+    description: "AUR SSH host (default aur.archlinux.org)"
+    required: false
+    default: "aur.archlinux.org"
+  commit_message:
+    description: "Commit message; {version} and {pkgname} are substituted"
+    required: false
+    default: "chore(aur): update to v{version}"
+  dry_run:
+    description: "When true, clones + prunes + stages but does not commit or push"
+    required: false
+    default: "false"
+
+outputs:
+  committed:
+    description: "'true' when a commit was pushed (or staged in dry-run); 'false' when nothing changed"
+    value: ${{ steps.entrypoint.outputs.committed }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: entrypoint
+      name: AUR sync
+      run: bash "$GITHUB_ACTION_PATH/entrypoint.sh"
+      shell: bash
+      env:
+        INPUT_PACKAGE_NAME: ${{ inputs.package_name }}
+        INPUT_SSH_KEY: ${{ inputs.ssh_key }}
+        INPUT_GIT_USERNAME: ${{ inputs.git_username }}
+        INPUT_GIT_EMAIL: ${{ inputs.git_email }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_RM_PATTERNS: ${{ inputs.rm_patterns }}
+        INPUT_SSH_HOST: ${{ inputs.ssh_host }}
+        INPUT_COMMIT_MESSAGE: ${{ inputs.commit_message }}
+        INPUT_DRY_RUN: ${{ inputs.dry_run }}
