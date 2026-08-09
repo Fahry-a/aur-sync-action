@@ -140,6 +140,16 @@ fi
 
 # --- Copy files ------------------------------------------------------------
 missing=0
+# versionSuffix inserts "-<version>" before the extension of a destination
+# name. PKGBUILD / .SRCINFO never get suffixed — they must stay bare for the
+# AUR toolchain (and for pkgrel handling), even when version is set.
+versionSuffix() {
+  local dest="$1"
+  case "$dest" in
+    PKGBUILD | .SRCINFO) echo "$dest" ;;
+    *) echo "$dest" | sed -E "s/(\.[^.]+)$/-${VERSION}\1/" ;;
+  esac
+}
 for i in "${!SRC_PATHS[@]}"; do
   path="${SRC_PATHS[$i]}"
   name="${DEST_NAMES[$i]}"
@@ -155,7 +165,7 @@ for i in "${!SRC_PATHS[@]}"; do
     for m in "${matches[@]}"; do
       dest="$(basename "$m")"
       if [[ -n "$VERSION" ]]; then
-        dest="$(basename "$m" | sed -E "s/(\.[^.]+)$/-${VERSION}\1/")"
+        dest="$(versionSuffix "$dest")"
       fi
       cp -v "$m" "./$dest"
     done
@@ -171,7 +181,7 @@ for i in "${!SRC_PATHS[@]}"; do
     dest="$name"
   fi
   if [[ -n "$VERSION" ]]; then
-    dest="$(basename "$dest" | sed -E "s/(\.[^.]+)$/-${VERSION}\1/")"
+    dest="$(versionSuffix "$dest")"
   fi
   cp -v "$path" "./$dest"
 done
