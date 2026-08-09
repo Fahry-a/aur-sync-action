@@ -1,0 +1,29 @@
+# AUR Sync is a composite action — there is no binary to build. GoReleaser is
+# used for its GitHub Release + changelog generation from the conventional
+# commit history, so tagging `v1.0.0` produces a tidy release page for the
+# action (same pattern as appleboy/scp-action).
+builds:
+  - skip: true
+
+changelog:
+  use: github
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Enhancements"
+      regexp: "^.*chore[(\\w)]*:+.*$"
+      order: 2
+    - title: "Refactor"
+      regexp: "^.*refactor[(\\w)]*:+.*$"
+      order: 3
+    - title: "Build process updates"
+      regexp: ^.*?(build|ci)(\(.+\))??!?:.+$
+      order: 4
+    - title: "Documentation updates"
+      regexp: ^.*?docs?(\(.+\))??!?:.+$
+      order: 4
+    - title: Others
