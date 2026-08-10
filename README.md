@@ -1,4 +1,5 @@
 # AUR Sync — GitHub Action
+[![E2E](https://github.com/Fahry-a/aur-sync-action/actions/workflows/ci.yml/badge.svg)](https://github.com/Fahry-a/aur-sync-action/actions/workflows/ci.yml)
 
 Publish `PKGBUILD` + assets to an [AUR](https://aur.archlinux.org) package
 with **stale-version pruning**, as one atomic commit — no window where the

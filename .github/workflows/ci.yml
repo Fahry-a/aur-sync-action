@@ -1,0 +1,565 @@
+name: E2E (ZeroTier + Soft Serve)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - ".github/workflows/goreleaser.yml"
+      - ".goreleaser.yaml"
+
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - ".github/workflows/goreleaser.yml"
+      - ".goreleaser.yaml"
+
+  workflow_dispatch:
+
+# Required repository secrets:
+#
+#   ZEROTIER_NETWORK_ID
+#   ZEROTIER_CENTRAL_TOKEN
+#   E2E_AUR_SSH_KEY
+#
+# Generate the E2E key once:
+#
+#   ssh-keygen -t ed25519 -N '' -f ci_e2e
+#
+# Store the PRIVATE key as E2E_AUR_SSH_KEY.
+#
+# The corresponding public key is derived automatically by the server.
+#
+# ZeroTier:
+#
+#   - Network uses 10.3.10.0/24
+#   - Server gets fixed address 10.3.10.55
+#   - Clients get addresses from the managed IP pool
+#
+# The action under test is expected to push to:
+#
+#   ssh://aur@10.3.10.55/<repo>.git
+#
+# The client SSH config maps 10.3.10.55 -> port 23231.
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ===========================================================================
+  # Secret gate
+  # ===========================================================================
+  gate:
+    runs-on: ubuntu-latest
+
+    outputs:
+      ok: ${{ steps.g.outputs.ok }}
+
+    steps:
+      - id: g
+        name: Check E2E secrets
+        env:
+          ZT_NET: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          ZT_TOKEN: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
+          E2E_KEY: ${{ secrets.E2E_AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$ZT_NET" && -n "$ZT_TOKEN" && -n "$E2E_KEY" ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "E2E secrets are configured."
+          else
+            echo "E2E secrets are not configured; skipping E2E jobs."
+          fi
+
+  # ===========================================================================
+  # Soft Serve server
+  # ===========================================================================
+  server:
+    needs: gate
+    if: ${{ needs.gate.outputs.ok == 'true' }}
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # -----------------------------------------------------------------------
+      # Download Soft Serve
+      # -----------------------------------------------------------------------
+      - name: Download Soft Serve
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            https://github.com/charmbracelet/soft-serve/releases/download/v0.12.2/soft-serve_0.12.2_Linux_x86_64.tar.gz \
+            | tar -xz \
+                --strip-components=1 \
+                soft-serve_0.12.2_Linux_x86_64/soft
+
+          chmod +x ./soft
+          ./soft --version
+
+      # -----------------------------------------------------------------------
+      # Prepare E2E SSH key
+      # -----------------------------------------------------------------------
+      - name: Prepare E2E SSH key
+        env:
+          E2E_KEY: ${{ secrets.E2E_AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          umask 077
+
+          printf '%s\n' "$E2E_KEY" > /tmp/e2e_key
+          chmod 600 /tmp/e2e_key
+
+          ssh-keygen -y \
+            -f /tmp/e2e_key \
+            > /tmp/e2e_key.pub
+
+          echo "Derived E2E public key:"
+          cat /tmp/e2e_key.pub
+
+      # -----------------------------------------------------------------------
+      # Start Soft Serve
+      # -----------------------------------------------------------------------
+      - name: Start Soft Serve
+        run: |
+          set -euo pipefail
+
+          export SOFT_SERVE_DATA_PATH=/tmp/soft-data
+          export SOFT_SERVE_INITIAL_ADMIN_KEYS="$(cat /tmp/e2e_key.pub)"
+          export SOFT_SERVE_SSH_LISTEN_ADDR=":23231"
+
+          nohup ./soft serve \
+            > /tmp/soft.log 2>&1 &
+
+          echo $! > /tmp/soft.pid
+
+          ready=0
+
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/23231) 2>/dev/null; then
+              ready=1
+              break
+            fi
+
+            sleep 1
+          done
+
+          if (( ! ready )); then
+            echo "Soft Serve failed to listen on port 23231."
+            echo "--- Soft Serve log ---"
+            cat /tmp/soft.log || true
+            exit 1
+          fi
+
+          echo "Soft Serve is listening on 127.0.0.1:23231."
+
+      # -----------------------------------------------------------------------
+      # Verify local Soft Serve authentication
+      # -----------------------------------------------------------------------
+      - name: Verify Soft Serve admin SSH access
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -p 23231 \
+            -i /tmp/e2e_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            localhost \
+            "help" \
+            > /tmp/soft-help.txt
+
+          grep -q "repo" /tmp/soft-help.txt
+
+          echo "Soft Serve SSH authentication works."
+
+      # -----------------------------------------------------------------------
+      # Create repositories
+      # -----------------------------------------------------------------------
+      - name: Pre-create test repositories
+        run: |
+          set -euo pipefail
+
+          for repo in \
+            odm-test-ubuntu \
+            odm-test-macos \
+            odm-test-windows
+          do
+            echo "Creating $repo..."
+
+            ssh \
+              -p 23231 \
+              -i /tmp/e2e_key \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=accept-new \
+              localhost \
+              repo create "$repo"
+          done
+
+      # -----------------------------------------------------------------------
+      # Join ZeroTier
+      # -----------------------------------------------------------------------
+      - name: Join ZeroTier
+        uses: zalfafa/zt-action@v1.0.5
+        with:
+          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
+          ip_assignments: "10.3.10.55"
+
+      # -----------------------------------------------------------------------
+      # Verify server ZeroTier address
+      # -----------------------------------------------------------------------
+      - name: Verify ZeroTier server address
+        run: |
+          set -euo pipefail
+
+          echo "--- IPv4 addresses ---"
+          ip -4 addr
+
+          found=0
+
+          for i in $(seq 1 30); do
+            if ip -4 addr | grep -q '10\.3\.10\.55'; then
+              found=1
+              break
+            fi
+
+            sleep 1
+          done
+
+          if (( ! found )); then
+            echo "ZeroTier address 10.3.10.55 was not assigned."
+            exit 1
+          fi
+
+          echo "ZeroTier server address confirmed: 10.3.10.55"
+
+      # -----------------------------------------------------------------------
+      # Wait for ALL client pushes.
+      #
+      # We intentionally query Git over SSH instead of inspecting Soft Serve's
+      # internal storage layout.
+      # -----------------------------------------------------------------------
+      - name: Wait for all client pushes
+        run: |
+          set -euo pipefail
+
+          repos=(
+            odm-test-ubuntu
+            odm-test-macos
+            odm-test-windows
+          )
+
+          for i in $(seq 1 60); do
+            all_pushed=1
+
+            echo "--- Push status (attempt $i/60) ---"
+
+            for repo in "${repos[@]}"; do
+              if git ls-remote \
+                "ssh://localhost:23231/$repo.git" \
+                'refs/heads/*' \
+                2>/dev/null \
+                | grep -q 'refs/heads/'
+              then
+                echo "$repo: pushed"
+              else
+                echo "$repo: waiting"
+                all_pushed=0
+              fi
+            done
+
+            if (( all_pushed )); then
+              echo "All three client repositories have been pushed."
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "E2E FAILED: not all client pushes arrived within 10 minutes."
+
+          echo "--- Soft Serve log ---"
+          cat /tmp/soft.log || true
+
+          exit 1
+
+      # -----------------------------------------------------------------------
+      # Verify ALL repositories
+      # -----------------------------------------------------------------------
+      - name: Verify all pushed repositories
+        run: |
+          set -euo pipefail
+
+          repos=(
+            odm-test-ubuntu
+            odm-test-macos
+            odm-test-windows
+          )
+
+          for repo_name in "${repos[@]}"; do
+            echo
+            echo "============================================================"
+            echo "Verifying repository: $repo_name"
+            echo "============================================================"
+
+            workdir="$(mktemp -d)"
+
+            trap 'rm -rf "$workdir"' EXIT
+
+            cd "$workdir"
+
+            GIT_SSH_COMMAND="ssh \
+              -i /tmp/e2e_key \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=accept-new" \
+              git clone -q \
+              "ssh://localhost:23231/$repo_name.git" \
+              repo
+
+            cd repo
+
+            echo "--- Repository contents ---"
+            find . -maxdepth 2 -type f -print | sort
+
+            # -----------------------------------------------------------------
+            # PKGBUILD
+            # -----------------------------------------------------------------
+            grep -q '^pkgver=9\.9\.9$' PKGBUILD || {
+              echo "PKGBUILD has wrong pkgver."
+              cat PKGBUILD
+              exit 1
+            }
+
+            # -----------------------------------------------------------------
+            # .SRCINFO
+            # -----------------------------------------------------------------
+            test -f .SRCINFO || {
+              echo ".SRCINFO missing."
+              exit 1
+            }
+
+            # -----------------------------------------------------------------
+            # Version-suffixed man page.
+            #
+            # The action receives:
+            #
+            #   man:odm.1
+            #
+            # and produces:
+            #
+            #   odm-9.9.9.1
+            # -----------------------------------------------------------------
+            test -f "odm-9.9.9.1" || {
+              echo "Version-suffixed man page missing."
+              exit 1
+            }
+
+            grep -q 'man page content' "odm-9.9.9.1" || {
+              echo "Version-suffixed man page has wrong content."
+              exit 1
+            }
+
+            # -----------------------------------------------------------------
+            # Commit message
+            # -----------------------------------------------------------------
+            commit_message="$(git log -1 --format=%s)"
+
+            echo "Latest commit:"
+            git log -1 --format='%H %s'
+
+            echo "$commit_message" | grep -q 'v9\.9\.9' || {
+              echo "Commit message does not contain v9.9.9."
+              exit 1
+            }
+
+            echo "Repository verification passed: $repo_name"
+
+            cd /
+            rm -rf "$workdir"
+            trap - EXIT
+          done
+
+          echo
+          echo "============================================================"
+          echo "E2E PASSED: Ubuntu + macOS + Windows"
+          echo "============================================================"
+
+      # -----------------------------------------------------------------------
+      # Cleanup
+      # -----------------------------------------------------------------------
+      - name: Stop Soft Serve
+        if: always()
+        run: |
+          if [[ -f /tmp/soft.pid ]]; then
+            kill "$(cat /tmp/soft.pid)" 2>/dev/null || true
+          fi
+
+  # ===========================================================================
+  # E2E clients
+  # ===========================================================================
+  client:
+    needs: gate
+    if: ${{ needs.gate.outputs.ok == 'true' }}
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - os: ubuntu-latest
+            pkg: odm-test-ubuntu
+
+          - os: macos-latest
+            pkg: odm-test-macos
+
+          - os: windows-latest
+            pkg: odm-test-windows
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # -----------------------------------------------------------------------
+      # Join ZeroTier
+      # -----------------------------------------------------------------------
+      - name: Join ZeroTier
+        uses: zalfafa/zt-action@v1.0.5
+        with:
+          network_id: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          auth_token: ${{ secrets.ZEROTIER_CENTRAL_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # Show network configuration
+      # -----------------------------------------------------------------------
+      - name: Show network configuration
+        run: |
+          set -euo pipefail
+
+          echo "--- Network interfaces ---"
+
+          if command -v ip >/dev/null 2>&1; then
+            ip -4 addr || true
+          else
+            ifconfig || true
+          fi
+
+      # -----------------------------------------------------------------------
+      # Configure SSH.
+      #
+      # The action under test uses the host without an explicit SSH port.
+      # Route that host to Soft Serve's actual SSH port.
+      # -----------------------------------------------------------------------
+      - name: Configure SSH route to Soft Serve
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$HOME/.ssh"
+
+          cat > "$HOME/.ssh/config" <<'EOF'
+          Host 10.3.10.55
+            HostName 10.3.10.55
+            Port 23231
+            StrictHostKeyChecking accept-new
+          EOF
+
+          chmod 600 "$HOME/.ssh/config"
+
+      # -----------------------------------------------------------------------
+      # Wait for Soft Serve over ZeroTier
+      # -----------------------------------------------------------------------
+      - name: Wait for Soft Serve over ZeroTier
+        run: |
+          set -euo pipefail
+
+          for i in $(seq 1 60); do
+            if ssh-keyscan \
+              -T 3 \
+              -p 23231 \
+              10.3.10.55 \
+              >/dev/null 2>&1
+            then
+              echo "Soft Serve is reachable over ZeroTier."
+              exit 0
+            fi
+
+            echo "Waiting for 10.3.10.55:23231..."
+            sleep 5
+          done
+
+          echo "E2E FAILED: Soft Serve is not reachable over ZeroTier."
+          exit 1
+
+      # -----------------------------------------------------------------------
+      # Prepare fake AUR package
+      # -----------------------------------------------------------------------
+      - name: Prepare fake AUR package files
+        env:
+          PACKAGE_NAME: ${{ matrix.pkg }}
+        run: |
+          set -euo pipefail
+
+          printf \
+            'pkgname=%s\npkgver=9.9.9\npkgrel=1\n' \
+            "$PACKAGE_NAME" \
+            > PKGBUILD
+
+          printf \
+            'pkgname = %s\npkgver = 9.9.9\npkgrel = 1\n' \
+            "$PACKAGE_NAME" \
+            > .SRCINFO
+
+          printf 'man page content\n' > odm.1
+
+          echo "--- PKGBUILD ---"
+          cat PKGBUILD
+
+          echo "--- .SRCINFO ---"
+          cat .SRCINFO
+
+          echo "--- man source ---"
+          cat odm.1
+
+      # -----------------------------------------------------------------------
+      # Run action under test
+      # -----------------------------------------------------------------------
+      - id: aur-sync
+        name: Run AUR action against CI Soft Serve
+        uses: ./
+        with:
+          package_name: ${{ matrix.pkg }}
+          ssh_key: ${{ secrets.E2E_AUR_SSH_KEY }}
+          git_username: e2e-ci
+          git_email: e2e@ci.invalid
+          version: "9.9.9"
+          files: "PKGBUILD,.SRCINFO,man:odm.1"
+          ssh_host: "10.3.10.55"
+
+      # -----------------------------------------------------------------------
+      # Verify action output
+      # -----------------------------------------------------------------------
+      - name: Assert the push happened
+        env:
+          COMMITTED: ${{ steps.aur-sync.outputs.committed }}
+        run: |
+          set -euo pipefail
+
+          echo "Action committed output: $COMMITTED"
+
+          test "$COMMITTED" = "true"
