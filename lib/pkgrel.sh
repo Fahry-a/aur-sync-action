@@ -5,7 +5,7 @@
 #   pkgval <file> <var>   -> e.g. pkgval PKGBUILD pkgver -> 1.2.0 ('' if absent)
 pkgval() {
   local f="$1" k="$2"
-  grep -oP "^$k=\K.*" "$f" 2>/dev/null | tr -d "'\"() \t" | tr -d '\r' | tail -n1
+  grep -oP "^$k=\K.*" "$f" 2>/dev/null | sed 's/#.*//' | tr -d "'\"() \t" | tr -d '\r' | tail -n1
 }
 
 # Computes the new pkgrel. $1 mode, followed by current values:
@@ -59,6 +59,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   printf "pkgver='1.2.0'\r\npkgrel=(3)\r\n" >"$tmp"
   [[ "$(pkgval "$tmp" pkgver)" == "1.2.0" ]] || { echo "FAIL pkgver"; exit 1; }
   [[ "$(pkgval "$tmp" pkgrel)" == "3" ]] || { echo "FAIL pkgrel"; exit 1; }
+  echo "  ok"
+
+  echo "pkgval strips inline comments:"
+  printf "pkgver=1.3.0 # latest stable\npkgrel=2 # bumped\n" >"$tmp"
+  [[ "$(pkgval "$tmp" pkgver)" == "1.3.0" ]] || { echo "FAIL pkgver inline comment"; exit 1; }
+  [[ "$(pkgval "$tmp" pkgrel)" == "2" ]] || { echo "FAIL pkgrel inline comment"; exit 1; }
   echo "  ok"
 
   echo "pkgrel_new rules:"
