@@ -16,14 +16,19 @@ parse_csv() {
 # Splits a files entry into name/path ("name:path" renames; path alone keeps basename).
 #   split_entry <entry> <name_var> <path_var>
 split_entry() {
-  local e="$1" nv="$2" pv="$3"
-  local name=""
-  if [[ "$e" == *:* ]]; then
-    name="${e%%:*}"
-    e="${e#*:}"
+  # BUGFIX: locals must not collide with the caller's output variable names.
+  # Previously `local name` shadowed the caller's `name` when the output
+  # variable was literally called `name` (split_entry "$e" name path), so
+  # `eval "name='...'"` wrote the LOCAL and the caller's `name` stayed empty
+  # -- silently dropping the "name:path" rename. Prefix the locals.
+  local _e="$1" _nv="$2" _pv="$3"
+  local _name=""
+  if [[ "$_e" == *:* ]]; then
+    _name="${_e%%:*}"
+    _e="${_e#*:}"
   fi
-  eval "$nv='$name'"
-  eval "$pv='$e'"
+  eval "$_nv='$_name'"
+  eval "$_pv='$_e'"
 }
 
 # Inserts "-<version>" before the extension; PKGBUILD/.SRCINFO keep bare names.
