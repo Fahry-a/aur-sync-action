@@ -366,18 +366,19 @@ jobs:
             #
             # The action receives:
             #
-            #   man:odm.1
+            #   odm-bin.1:odm.1
             #
-            # and produces:
+            # and produces (rename applied, then <version> inserted before the
+            # LAST extension — same as real ODM usage):
             #
-            #   odm-9.9.9.1
+            #   odm-bin-9.9.9.1
             # -----------------------------------------------------------------
-            test -f "odm-9.9.9.1" || {
+            test -f "odm-bin-9.9.9.1" || {
               echo "Version-suffixed man page missing."
               exit 1
             }
 
-            grep -q 'man page content' "odm-9.9.9.1" || {
+            grep -q 'man page content' "odm-bin-9.9.9.1" || {
               echo "Version-suffixed man page has wrong content."
               exit 1
             }
@@ -560,7 +561,7 @@ jobs:
           git_username: e2e-ci
           git_email: e2e@ci.invalid
           version: "9.9.9"
-          files: "PKGBUILD,.SRCINFO,man:odm.1"
+          files: "PKGBUILD,.SRCINFO,odm-bin.1:odm.1"
           ssh_host: "10.3.10.55"
 
       # -----------------------------------------------------------------------
