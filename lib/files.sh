@@ -14,9 +14,9 @@ parse_csv() {
   IFS=',' read -r -a tmp <<<"$input"
   for e in "${tmp[@]}"; do
     e="${e// /}"
-    [[ -n "$e" ]] && out+="$e"$'\n'
+    [[ -n "$e" ]] && out+="${out:+,}$e" # comma-JOIN: read below consumes ONE line only
   done
-  IFS=',' read -r -a "$var" <<<"${out%$'\n'}"
+  IFS=',' read -r -a "$var" <<<"$out"
 }
 
 # Splits a files entry into name/path ("name:path" renames; path alone keeps basename).
@@ -48,12 +48,17 @@ version_suffix() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  # self-test
+  # self-test. NOTE: assertions use `|| fail` — a bare `[[ ]] && [[ ]]` chain
+  # does NOT trip errexit when the left side fails (bash gotcha), which once
+  # let this suite pass while parse_csv returned a single entry.
   set -euo pipefail
+  fail() { echo "FAIL: $1" >&2; exit 1; }
   echo "parse_csv:"
   a=()
   parse_csv " PKGBUILD ,x:../docs/odm.1,,foo ," a
-  [[ "${#a[@]}" == 3 ]] && [[ "${a[0]}" == "PKGBUILD" ]] && [[ "${a[1]}" == "x:../docs/odm.1" ]]
+  [[ "${#a[@]}" == 3 ]] || fail "parse_csv: want 3 entries, got ${#a[@]}: ${a[*]:-}"
+  [[ "${a[0]}" == "PKGBUILD" && "${a[1]}" == "x:../docs/odm.1" && "${a[2]}" == "foo" ]] \
+    || fail "parse_csv entries wrong: ${a[*]}"
   echo "  ok"
 
   echo "split_entry:"
