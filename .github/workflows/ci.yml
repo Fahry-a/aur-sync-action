@@ -260,6 +260,10 @@ jobs:
             odm-test-windows
           )
 
+          # Same explicit identity as the admin verification above — git takes
+          # ssh options through GIT_SSH_COMMAND (ls-remote has no -i/-o).
+          export GIT_SSH_COMMAND="ssh -i /tmp/e2e_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
           for i in $(seq 1 60); do
             all_pushed=1
 
@@ -270,9 +274,6 @@ jobs:
               # failure indistinguishable from "no push yet" and burns the
               # whole 10-minute window on a phantom wait.
               if out=$(git ls-remote \
-                    -o IdentitiesOnly=yes \
-                    -i /tmp/e2e_key \
-                    -o StrictHostKeyChecking=accept-new \
                     "ssh://localhost:23231/$repo.git" \
                     'refs/heads/*' \
                     2>&1)
