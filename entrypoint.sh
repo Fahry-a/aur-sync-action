@@ -80,15 +80,23 @@ aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmq
 aur.archlinux.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDKF9vAFWdgm9Bi8uc+tYRBmXASBb5cB5iZsB7LOWWFeBrLp3r14w0/9S2vozjgqY5sJLDPONWoTTaVTbhe3vwO8CBKZTEt1AcWxuXNlRnk9FliR1/eNB9uz/7y1R0+c1Md+P98AJJSJWKN12nqIDIhjl2S1vOUvm7FNY43fU2knIhEbHybhwWeg+0wxpKwcAd/JeL5i92Uv03MYftOToUijd1pqyVFdJvQFhqD4v3M157jxS5FTOBrccAEjT+zYmFyD8WvKUa9vUclRddNllmBJdy4NyLB8SvVZULUPrP3QOlmzemeKracTlVOUG1wsDbxknF1BwSCU7CmU6UFP90kpWIyz66bP0bl67QAvlIc52Yix7pKJPbw85+zykvnfl2mdROsaT8p8R9nwCdFsBc9IiD0NhPEHcyHRwB8fokXTajk2QnGhL+zP5KnkmXnyQYOCUYo3EKMXIlVOVbPDgRYYT/XqvBuzq5S9rrU70KoI/S5lDnFfx/+lPLdtcnnEPk=
 aur.archlinux.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLMiLrP8pVi5BFX2i3vepSUnpedeiewE5XptnUnau+ZoeUOPkpoCgZZuYfpaIQfhhJJI5qgnjJmr4hyJbe/zxow=
 HOSTKEYS
+  chmod 600 "$KH"
+  umask 077
+  printf '%s\n' "$INPUT_SSH_KEY" >"$HOME/.ssh/aur_key"
+  chmod 600 "$HOME/.ssh/aur_key"
+  # Pinned keys make strict checking safe here.
+  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 else
-  echo "::warning::ssh_host=$SSH_HOST is not aur.archlinux.org: host key TOFU via ssh-keyscan (fine for test rigs, pin keys for production)" >&2
-  ssh-keyscan -t rsa,ecdsa,ed25519 "$SSH_HOST" >>"$KH" 2>/dev/null || true
+  # Custom hosts (self-hosted test rigs) usually bring their OWN port and
+  # host-key setup via ~/.ssh/config (e.g. Soft Serve on :23231) — keyscan on
+  # :22 can't see it, so forcing strict here would break every push. Trust the
+  # caller's SSH configuration; the ::warning:: keeps that choice visible.
+  echo "::warning::ssh_host=$SSH_HOST is not aur.archlinux.org: host keys follow your own ~/.ssh/config (TOFU); pin keys for production use" >&2
+  umask 077
+  printf '%s\n' "$INPUT_SSH_KEY" >"$HOME/.ssh/aur_key"
+  chmod 600 "$HOME/.ssh/aur_key"
+  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes"
 fi
-chmod 600 "$KH"
-umask 077
-printf '%s\n' "$INPUT_SSH_KEY" >"$HOME/.ssh/aur_key"
-chmod 600 "$HOME/.ssh/aur_key"
-export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
 # --- Clone the AUR repo ----------------------------------------------------
 AUR_DIR="$(mktemp -d)"
