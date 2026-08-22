@@ -2,37 +2,39 @@
 # files/paths helpers — pure functions. Import via `source`.
 
 # Parses INPUT_FILES/INPUT_RM_PATTERNS into a bash array (comma-separated).
-#   parse_csv <input> <varname>  -> fills <varname> (a NAMEREF) with trimmed entries
+#   parse_csv <input> <varname>  -> fills <varname> with trimmed entries
+#
+# Portability + safety notes: macOS runners ship /bin/bash 3.2 (no namerefs),
+# so the caller's array is filled via `read -a "$var"` — a dynamic NAME is
+# fine there because read never re-parses VALUES as shell. No eval anywhere:
+# inputs are workflow strings, not trusted code.
 parse_csv() {
-  local input="$1" var="$2" e
+  local input="$1" var="$2" e out=""
   local -a tmp=()
   IFS=',' read -r -a tmp <<<"$input"
-  local -n out="$var" # assignment writes straight through to the caller's array
   for e in "${tmp[@]}"; do
     e="${e// /}"
-    [[ -n "$e" ]] && out+=("$e")
+    [[ -n "$e" ]] && out+="$e"$'\n'
   done
+  IFS=',' read -r -a "$var" <<<"${out%$'\n'}"
 }
 
 # Splits a files entry into name/path ("name:path" renames; path alone keeps basename).
 #   split_entry <entry> <name_var> <path_var>
 #
-# Outputs are bash NAMEREFS (>= 4.3). This replaced an eval-based version that
-# had two defects: `local name` shadowed the caller's output variable when it
-# was literally called "name" (silently dropping the rename), and the
-# single-quote wrapping in `eval "$_pv='$_e'"` broke on values containing a
-# quote character. Inputs are workflow strings, not trusted code — they must
-# never be parsed back as shell, so there is no eval left on this path.
+# Assignments go through `printf -v` (bash >= 3.1): values land verbatim in
+# the caller's variables with no eval and no quoting to break. History: this
+# used to be eval-based — `local name` once shadowed an output variable
+# literally called "name", and single-quote wrapping broke on entries
+# containing a quote character.
 split_entry() {
-  local entry="$1"
-  local -n name_out="$2"
-  local -n path_out="$3"
-  name_out=""
+  local entry="$1" _name=""
   if [[ "$entry" == *:* ]]; then
-    name_out="${entry%%:*}"
+    _name="${entry%%:*}"
     entry="${entry#*:}"
   fi
-  path_out="$entry"
+  printf -v "$2" '%s' "$_name"
+  printf -v "$3" '%s' "$entry"
 }
 
 # Inserts "-<version>" before the extension; PKGBUILD/.SRCINFO keep bare names.
