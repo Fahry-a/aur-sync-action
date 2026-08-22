@@ -2,33 +2,37 @@
 # files/paths helpers — pure functions. Import via `source`.
 
 # Parses INPUT_FILES/INPUT_RM_PATTERNS into a bash array (comma-separated).
-#   parse_csv <input> <varname>  -> fills <varname> with trimmed entries
+#   parse_csv <input> <varname>  -> fills <varname> (a NAMEREF) with trimmed entries
 parse_csv() {
   local input="$1" var="$2" e
   local -a tmp=()
   IFS=',' read -r -a tmp <<<"$input"
+  local -n out="$var" # assignment writes straight through to the caller's array
   for e in "${tmp[@]}"; do
     e="${e// /}"
-    [[ -n "$e" ]] && eval "${var}+=(\"\$e\")"
+    [[ -n "$e" ]] && out+=("$e")
   done
 }
 
 # Splits a files entry into name/path ("name:path" renames; path alone keeps basename).
 #   split_entry <entry> <name_var> <path_var>
+#
+# Outputs are bash NAMEREFS (>= 4.3). This replaced an eval-based version that
+# had two defects: `local name` shadowed the caller's output variable when it
+# was literally called "name" (silently dropping the rename), and the
+# single-quote wrapping in `eval "$_pv='$_e'"` broke on values containing a
+# quote character. Inputs are workflow strings, not trusted code — they must
+# never be parsed back as shell, so there is no eval left on this path.
 split_entry() {
-  # BUGFIX: locals must not collide with the caller's output variable names.
-  # Previously `local name` shadowed the caller's `name` when the output
-  # variable was literally called `name` (split_entry "$e" name path), so
-  # `eval "name='...'"` wrote the LOCAL and the caller's `name` stayed empty
-  # -- silently dropping the "name:path" rename. Prefix the locals.
-  local _e="$1" _nv="$2" _pv="$3"
-  local _name=""
-  if [[ "$_e" == *:* ]]; then
-    _name="${_e%%:*}"
-    _e="${_e#*:}"
+  local entry="$1"
+  local -n name_out="$2"
+  local -n path_out="$3"
+  name_out=""
+  if [[ "$entry" == *:* ]]; then
+    name_out="${entry%%:*}"
+    entry="${entry#*:}"
   fi
-  eval "$_nv='$_name'"
-  eval "$_pv='$_e'"
+  path_out="$entry"
 }
 
 # Inserts "-<version>" before the extension; PKGBUILD/.SRCINFO keep bare names.
@@ -56,6 +60,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   [[ "$n" == "man" ]] && [[ "$p" == "../docs/odm.1" ]]
   split_entry "PKGBUILD" n p
   [[ "$n" == "" ]] && [[ "$p" == "PKGBUILD" ]]
+  split_entry "weird'name:../d.1" n p # quote-bearing input stays inert data
+  [[ "$n" == "weird'name" ]] && [[ "$p" == "../d.1" ]]
   echo "  ok"
 
   echo "version_suffix:"
