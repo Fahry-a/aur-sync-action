@@ -266,15 +266,26 @@ jobs:
             echo "--- Push status (attempt $i/60) ---"
 
             for repo in "${repos[@]}"; do
-              if git ls-remote \
-                "ssh://localhost:23231/$repo.git" \
-                'refs/heads/*' \
-                2>/dev/null \
-                | grep -q 'refs/heads/'
+              # Errors must be LOUD here: swallowing stderr makes an auth/route
+              # failure indistinguishable from "no push yet" and burns the
+              # whole 10-minute window on a phantom wait.
+              if out=$(git ls-remote \
+                    -o IdentitiesOnly=yes \
+                    -i /tmp/e2e_key \
+                    -o StrictHostKeyChecking=accept-new \
+                    "ssh://localhost:23231/$repo.git" \
+                    'refs/heads/*' \
+                    2>&1)
               then
-                echo "$repo: pushed"
+                if grep -q 'refs/heads/' <<<"$out"; then
+                  echo "$repo: pushed"
+                else
+                  echo "$repo: waiting"
+                  all_pushed=0
+                fi
               else
-                echo "$repo: waiting"
+                echo "$repo: ls-remote FAILED:"
+                echo "$out" | sed 's/^/    /'
                 all_pushed=0
               fi
             done
