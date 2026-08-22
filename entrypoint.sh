@@ -63,11 +63,32 @@ declare -a SRC_PATHS=() DEST_NAMES=() # empty name = keep basename
 # --- SSH identity ----------------------------------------------------------
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
-ssh-keyscan -t rsa,ecdsa,ed25519 "$SSH_HOST" >>"$HOME/.ssh/known_hosts" 2>/dev/null || true
+
+# Host-key policy. For the default AUR host the keys are PINNED below, so a
+# MITM between the runner and aur.archlinux.org cannot redirect pushes
+# (StrictHostKeyChecking=yes refuses anything not pinned). Fingerprints as of
+# 2026-08 — re-verify against https://aur.archlinux.org before updating:
+#   ED25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+#   RSA     SHA256:5s5cIyReIfNNVGRFdDbe3hdYiI5OelHGpw2rOUud3Q8
+#   ECDSA   SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI
+# Custom hosts (self-hosted test rigs via ssh_host) can't ship pinned keys:
+# fall back to TOFU keyscan with a loud warning instead of silently trusting.
+KH="$HOME/.ssh/known_hosts"
+if [[ "$SSH_HOST" == "aur.archlinux.org" ]]; then
+  cat >"$KH" <<'HOSTKEYS'
+aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+aur.archlinux.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDKF9vAFWdgm9Bi8uc+tYRBmXASBb5cB5iZsB7LOWWFeBrLp3r14w0/9S2vozjgqY5sJLDPONWoTTaVTbhe3vwO8CBKZTEt1AcWxuXNlRnk9FliR1/eNB9uz/7y1R0+c1Md+P98AJJSJWKN12nqIDIhjl2S1vOUvm7FNY43fU2knIhEbHybhwWeg+0wxpKwcAd/JeL5i92Uv03MYftOToUijd1pqyVFdJvQFhqD4v3M157jxS5FTOBrccAEjT+zYmFyD8WvKUa9vUclRddNllmBJdy4NyLB8SvVZULUPrP3QOlmzemeKracTlVOUG1wsDbxknF1BwSCU7CmU6UFP90kpWIyz66bP0bl67QAvlIc52Yix7pKJPbw85+zykvnfl2mdROsaT8p8R9nwCdFsBc9IiD0NhPEHcyHRwB8fokXTajk2QnGhL+zP5KnkmXnyQYOCUYo3EKMXIlVOVbPDgRYYT/XqvBuzq5S9rrU70KoI/S5lDnFfx/+lPLdtcnnEPk=
+aur.archlinux.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLMiLrP8pVi5BFX2i3vepSUnpedeiewE5XptnUnau+ZoeUOPkpoCgZZuYfpaIQfhhJJI5qgnjJmr4hyJbe/zxow=
+HOSTKEYS
+else
+  echo "::warning::ssh_host=$SSH_HOST is not aur.archlinux.org: host key TOFU via ssh-keyscan (fine for test rigs, pin keys for production)" >&2
+  ssh-keyscan -t rsa,ecdsa,ed25519 "$SSH_HOST" >>"$KH" 2>/dev/null || true
+fi
+chmod 600 "$KH"
 umask 077
 printf '%s\n' "$INPUT_SSH_KEY" >"$HOME/.ssh/aur_key"
 chmod 600 "$HOME/.ssh/aur_key"
-export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes"
+export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
 # --- Clone the AUR repo ----------------------------------------------------
 AUR_DIR="$(mktemp -d)"
