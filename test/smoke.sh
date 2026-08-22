@@ -38,11 +38,17 @@ chmod +x "$ROOT/fakebin/git"
 echo "--- running entrypoint (dry-run) ---"
 # The entrypoint's `git status --short` in dry-run is the observable truth of
 # what got staged (its clone dir is wiped by the EXIT trap afterwards).
+#
+# Naming semantics pinned here (matches action.yml + real ODM usage): a
+# `name:` prefix renames on the AUR side, then <version> is inserted before
+# the LAST extension — so `odm-bin.1:../docs/odm.1` lands as
+# odm-bin-1.3.0.1. An extension-less rename (`bare:...`) stays bare, since
+# there is no extension to insert before.
 ( cd "$ROOT/work" && PATH="$ROOT/fakebin:$PATH" \
   GITHUB_OUTPUT="$ROOT/out" \
   INPUT_PACKAGE_NAME=odm-bin INPUT_SSH_KEY=dummy INPUT_SSH_HOST=localhost \
   INPUT_GIT_USERNAME=t INPUT_GIT_EMAIL=t@t INPUT_VERSION=1.3.0 \
-  INPUT_FILES='PKGBUILD,.SRCINFO,man:../docs/odm.1' \
+  INPUT_FILES='PKGBUILD,.SRCINFO,odm-bin.1:../docs/odm.1' \
   INPUT_RM_PATTERNS='odm-bin-*.1' INPUT_PKGREL_MODE=auto INPUT_DRY_RUN=true \
   bash "$THIS_DIR/../entrypoint.sh" > "$ROOT/run.log" 2>&1 )
 cat "$ROOT/run.log"
@@ -50,8 +56,8 @@ cat "$ROOT/run.log"
 echo "--- asserting (from entrypoint output) ---"
 fail() { echo "FAIL: $1"; exit 1; }
 grep -q '^committed=true' "$ROOT/out" || fail "committed=true (would publish)"
-grep -q 'A  odm-1.3.0.1' "$ROOT/run.log" || fail "version-suffixed asset staged (A odm-1.3.0.1)"
-grep -q 'R  odm-bin-1.2.0.1' "$ROOT/run.log" || fail "stale asset pruned (R odm-bin-1.2.0.1)"
+grep -q '^A  odm-bin-1.3.0.1' "$ROOT/run.log" || fail "renamed+suffixed asset staged (A odm-bin-1.3.0.1)"
+grep -q '^R  odm-bin-1.2.0.1' "$ROOT/run.log" || fail "stale asset pruned (R odm-bin-1.2.0.1)"
 grep -q '^M  PKGBUILD' "$ROOT/run.log" || fail "PKGBUILD modified (pkgrel) staged"
 grep -q 'pkgrel: 2 -> 3 (mode auto)' "$ROOT/run.log" || fail "pkgrel auto bump output"
 grep -q 'dry-run: staged but not committed' "$ROOT/run.log" || fail "dry-run announced"
